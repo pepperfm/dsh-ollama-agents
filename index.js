@@ -3,7 +3,8 @@
  * Zero runtime dependencies. DSH owns permissions, prompts, commands and plan state.
  */
 export const name = 'ollama-agents'
-export const inject = ['commands', 'systemPrompt', 'planMode', 'permissionPresets']
+// Plan Mode lives inside each agent preset in Desktop, not on the host.
+export const inject = ['commands', 'systemPrompt', 'permissionPresets']
 
 const roles = new WeakMap()
 
@@ -34,14 +35,25 @@ const guidance = {
   ].join(' ')
 }
 
+function planModeFor(ctx, agent) {
+  const presets = ctx.get('agentPresets')
+  if (presets) return presets.serviceFor(agent, 'planMode')
+  return ctx.get('planMode')
+}
+
 function currentRole(ctx, agent) {
   if (!agent) return 'organize'
-  const planState = ctx.planMode.get(agent)
-  if (planState.pending ?? planState.active) return 'plan'
+  const planState = planModeFor(ctx, agent)?.get(agent)
+  if (planState && (planState.pending ?? planState.active)) return 'plan'
   return roles.get(agent) ?? 'organize'
 }
 
 function selectRole(ctx, agent, role) {
+  if (!agent) return { kind: 'error', text: 'Выбери активную сессию DSH.' }
+  const planMode = planModeFor(ctx, agent)
+  if (!planMode) {
+    return { kind: 'error', text: 'Текущий пресет агента не предоставляет Plan Mode. Выбери Standard, Cordis или PTC.' }
+  }
   // Fail closed before changing the session: never silently fall back to Full access.
   const preset = role === 'plan' ? 'read-only' : 'workspace-write'
   try {
@@ -51,7 +63,7 @@ function selectRole(ctx, agent, role) {
   }
   try {
     ctx.permissionPresets.set(agent.session, preset)
-    ctx.planMode.set(agent, role === 'plan')
+    planMode.set(agent, role === 'plan')
     roles.set(agent, role)
     return { kind: 'success', text: `Режим ${role.toUpperCase()} включён. DSH Permissions: ${preset}.` }
   } catch (error) {

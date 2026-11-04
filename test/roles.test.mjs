@@ -1,8 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { apply } from '../index.js'
+import { apply, inject } from '../index.js'
 
-function harness({ readOnly = true } = {}) {
+function harness({ readOnly = true, scoped = true, planning = true } = {}) {
   const commands = new Map()
   const state = new WeakMap()
   let prompt
@@ -18,6 +18,14 @@ function harness({ readOnly = true } = {}) {
       set(session, name) { session.permission = name }
     }
   }
+  const planMode = ctx.planMode
+  if (scoped) {
+    ctx.agentPresets = { serviceFor(agent, name) { return planning && name === 'planMode' ? planMode : undefined } }
+    delete ctx.planMode
+  } else if (!planning) {
+    delete ctx.planMode
+  }
+  ctx.get = (name) => ctx[name]
   apply(ctx)
   const agent = { session: {}, options: {} }
   return { agent, commands, getPrompt: () => prompt.text({ agent }), ctx }
@@ -59,4 +67,38 @@ test('unknown role is not accepted', () => {
   const res = h.commands.get('agent-role').handler({agent:h.agent,rawInput:'root'})
   assert.equal(res.kind, 'error')
   assert.match(h.getPrompt(), /ORGANIZE/)
+})
+
+
+test('host plugin activates without a host Plan Mode dependency', () => {
+  assert.deepEqual(inject, ['commands', 'systemPrompt', 'permissionPresets'])
+  const h = harness()
+  assert.equal(h.ctx.planMode, undefined)
+  assert.equal(h.commands.get('agent-plan').handler({ agent: h.agent }).kind, 'success')
+})
+
+test('preset without planning refuses every switch before permissions change', () => {
+  const h = harness({ planning: false })
+  for (const name of ['agent-plan', 'agent-build', 'organize']) {
+    assert.equal(h.commands.get(name).handler({ agent: h.agent }).kind, 'error')
+    assert.equal(h.agent.session.permission, undefined)
+  }
+  assert.match(h.getPrompt(), /ORGANIZE/)
+})
+
+test('preset-free compositions use native host Plan Mode', () => {
+  const h = harness({ scoped: false })
+  assert.equal(h.commands.get('agent-plan').handler({ agent: h.agent }).kind, 'success')
+  assert.match(h.getPrompt(), /PLAN/)
+})
+
+test('each session resolves its own preset Plan Mode', () => {
+  const h = harness()
+  const other = { session: {} }
+  h.ctx.agentPresets.serviceFor = (agent) => agent === h.agent ? {
+    get: () => ({ active: true, pending: false }),
+    set() {}
+  } : { get: () => ({ active: true }), set() {} }
+  assert.match(h.getPrompt(), /ORGANIZE/)
+  assert.match(h.commands.get('agent-role').handler({ agent: other, rawInput: '' }).text, /PLAN/)
 })
