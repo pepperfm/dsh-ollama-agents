@@ -1,0 +1,3 @@
+- insert:
+    - id: ollama-agents
+      name: dsh-ollama-agents
