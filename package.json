@@ -1,6 +1,6 @@
 {
   "name": "dsh-ollama-agents",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "index.js",
@@ -8,7 +8,9 @@
   "files": [
     "index.js",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "role-state.js",
+    "client.js"
   ],
   "engines": {
     "dsh": ">=0.2.0 <0.3.0"
@@ -16,9 +18,25 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-session"
+      ],
+      "platform": "web"
     }
   },
   "scripts": {
     "test": "node --test"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "zod": "^4.4.3"
   }
 }

@@ -1,12 +1,29 @@
+import { z } from 'zod'
+import { roleKey, reduceRole } from './role-state.js'
+
 /**
  * DeepSeek Harness: organize / plan / build roles.
- * Zero runtime dependencies. DSH owns permissions, prompts, commands and plan state.
+ * DSH owns permissions, prompts, commands and plan state; Zod validates the projection.
  */
 export const name = 'ollama-agents'
 // Plan Mode lives inside each agent preset in Desktop, not on the host.
-export const inject = ['commands', 'systemPrompt', 'permissionPresets']
+export const inject = ['commands', 'systemPrompt', 'permissionPresets', 'sessionProjections']
 
-const roles = new WeakMap()
+const roleSchema = z.union([z.literal('organize'), z.literal('plan'), z.literal('build')])
+const roleProjection = {
+  key: roleKey,
+  stateVersion: 1,
+  stateSchema: z.object({
+    role: roleSchema,
+    running: z.object({ commandId: z.string(), role: roleSchema }).strict().nullable()
+  }).strict(),
+  init: () => ({ role: 'organize', running: null }),
+  apply: reduceRole,
+  wire: {
+    viewSchema: z.object({ role: roleSchema }).strict(),
+    view: (state) => ({ role: state.role })
+  }
+}
 
 const guidance = {
   organize: [
@@ -45,7 +62,8 @@ function currentRole(ctx, agent) {
   if (!agent) return 'organize'
   const planState = planModeFor(ctx, agent)?.get(agent)
   if (planState && (planState.pending ?? planState.active)) return 'plan'
-  return roles.get(agent) ?? 'organize'
+  const role = ctx.sessionProjections.stateOf(agent.session, roleKey)?.role ?? 'organize'
+  return role === 'plan' ? 'organize' : role
 }
 
 function selectRole(ctx, agent, role) {
@@ -64,7 +82,6 @@ function selectRole(ctx, agent, role) {
   try {
     ctx.permissionPresets.set(agent.session, preset)
     planMode.set(agent, role === 'plan')
-    roles.set(agent, role)
     return { kind: 'success', text: `Режим ${role.toUpperCase()} включён. DSH Permissions: ${preset}.` }
   } catch (error) {
     return { kind: 'error', text: `Не удалось изменить роль: ${error instanceof Error ? error.message : String(error)}` }
@@ -72,6 +89,7 @@ function selectRole(ctx, agent, role) {
 }
 
 export function apply(ctx) {
+  ctx.sessionProjections.register(roleProjection)
   ctx.systemPrompt.section({
     name: 'workspace:agent-role',
     order: 80,
